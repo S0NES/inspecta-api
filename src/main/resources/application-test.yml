@@ -1,0 +1,30 @@
+# Profile test (default se SPRING_PROFILES_ACTIVE nao for setado): roda local/CI sem
+# nenhuma credencial real. Infra com default localhost; JWT_SECRET tem fallback de dev.
+# MockHttpGateway garante que nenhuma chamada HTTP real (Pleno, etc.) sai do processo.
+# .env e carregado opcionalmente para conveniencia local (manual export nao necessario).
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/inspecta}
+    username: ${DATABASE_USER:inspecta}
+    password: ${DATABASE_PASSWORD:inspecta}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:inspecta}
+    password: ${RABBITMQ_PASSWORD:inspecta}
+
+inspecta:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  jwt:
+    secret: ${JWT_SECRET:change-me-minimum-256-bits-secret-for-dev-only!!}
+    access-ttl: PT12H
+  payment:
+    provider: ${PAYMENT_PROVIDER:mock}
+  pleno:
+    mode: ${PLENO_MODE:mock}
+    base-url: ${PLENO_BASE_URL:}
+    client-id: ${PLENO_CLIENT_ID:}
+    client-secret: ${PLENO_CLIENT_SECRET:}

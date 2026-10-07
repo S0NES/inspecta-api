@@ -1,0 +1,34 @@
+# Profile usado SÓ pelo build-runner (Dokploy, ci/entrypoint.sh) ao rodar a pasta
+# "Auth" da collection Postman/Bruno contra um stack efêmero (Postgres+RabbitMQ
+# recém-criados nesse run, destruídos no fim). Nunca usado em prod nem local — a
+# única diferença real pro profile "test" é a migration extra que cria o usuário de
+# login que o Newman usa (db/migration-ci/V900__ci_seed_admin.sql).
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
+  flyway:
+    locations: classpath:db/migration,classpath:db/migration-ci
+
+inspecta:
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    secret: ${JWT_SECRET}
+  payment:
+    provider: mock
+  pleno:
+    mode: mock
+    # O application.yml base define base-url/client-id/client-secret como ${PLENO_*}
+    # sem default (fail-fast em prod). O inspecta-core sempre instancia o
+    # PlenoAuthService, entao no smoke (sem essas envs) o placeholder precisa
+    # resolver mesmo com mode=mock. Espelha o application-test.yml.
+    base-url: ${PLENO_BASE_URL:}
+    client-id: ${PLENO_CLIENT_ID:}
+    client-secret: ${PLENO_CLIENT_SECRET:}

@@ -1,0 +1,14 @@
+# Build-runner do inspecta-api: builda, testa (unit + integração + API) e, se tudo passar,
+# publica a imagem e aciona o deploy real. Roda com /var/run/docker.sock montado (ver
+# docker-compose.ci.yml) -- os containers que ele cria com `docker build`/`docker run`
+# sao siblings no MESMO host Docker do Dokploy, nao aninhados. E um app Dokploy a
+# parte: o app de producao do inspecta-api continua Source=Docker Image, inalterado por isto.
+FROM maven:3.9-eclipse-temurin-21
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends docker.io nodejs npm curl \
+ && npm install -g newman \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /ws
+COPY . .
+RUN chmod +x ci/entrypoint.sh
+ENTRYPOINT ["ci/entrypoint.sh"]

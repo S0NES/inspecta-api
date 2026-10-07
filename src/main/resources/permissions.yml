@@ -1,0 +1,206 @@
+# permissions.yml — matriz de permissoes (spec fase-1: "Converter matrix xlsx -> permissions.yml").
+# Fonte: planilha de permissoes (screenshot), transcrita em 2026-07-22.
+#
+# escopo:
+#   full   - qualquer registro, sem restricao
+#   tenant - so dentro da propria imobiliaria (RLS Postgres via app.current_tenant)
+#   own    - so os registros do proprio usuario (vistoriador: suas atribuicoes; cliente: suas solicitacoes)
+#
+# Perfis: admin, suporte, imob_gerencia, imob_operacao, vistoriador, cliente.
+# Perfil ausente de uma acao = sem acesso (default deny).
+#
+# NOTAS DE TRANSCRICAO (confirmado com o usuario em 2026-07-22):
+#   - Celula laranja sem texto na planilha = sem acesso (tratada igual ao traco "-").
+#   - A planilha nao tinha coluna "cliente". As duas entradas cliente abaixo (solicitacoes.criar,
+#     pagamentos.criar_cobranca) foram INFERIDAS do que ja existe hardcoded em @PreAuthorize no
+#     codigo hoje, nao vieram da planilha. Revisar se a planilha ganhar uma coluna cliente.
+#
+# STATUS: gerado a partir da planilha aprovada. Enforcement (@PreAuthorize por controller) ainda
+# nao foi 100% conferido linha a linha contra este arquivo — ver TODOs por acao abaixo onde ja
+# achei divergencia com o codigo atual.
+
+usuarios:
+  criar_admin:
+    admin: full
+  criar_outros_perfis:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    # FIXED: AuthService.invite() now checks SecurityContext and throws AccessDeniedException
+    # if suporte tries to invite perfil=admin. Documented in AuthService.invite() with T2.3(a) comment.
+  editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+  excluir:
+    admin: full
+
+imobiliarias:
+  cadastrar:
+    admin: full
+  listar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    # NOVO: GET /v1/imobiliarias (T-fix-A2). imobiliarias e a propria tabela de tenant (nao
+    # tem imobiliaria_id proprio), entao o escopo "tenant" aqui e aplicado em codigo
+    # (ImobiliariaService.list via TenantContext), nao por RLS Postgres.
+  editar:
+    admin: full
+    suporte: full
+    imob_gerencia: own
+  excluir:
+    admin: full
+
+clientes:
+  cadastrar_editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+  excluir:
+    admin: full
+
+clientes_b2c:
+  # Cliente B2C (prompt "4 telas B2C", Paginas 1-2) - global, sem imobiliaria.
+  # Nao esta na planilha original; cadastro/listagem restritos a admin/suporte,
+  # mesmo escopo de "usuarios.criar_outros_perfis" ja que criarComConvite chama
+  # AuthService.invite(perfil=cliente).
+  cadastrar_editar_listar:
+    admin: full
+    suporte: full
+  inativar:
+    admin: full
+    suporte: full
+
+biletagem_cliente:
+  # Pagina 3 do prompt "4 telas B2C" - preco B2C global (nao e por imobiliaria).
+  visualizar_editar:
+    admin: full
+    suporte: full
+
+imoveis:
+  cadastrar_editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+  excluir:
+    admin: full
+
+contratos:
+  cadastrar_editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+  servicos:
+    admin: full   # POST /v1/contratos/{id}/servicos — matches @PreAuthorize("hasRole('ADMIN')"), same as faixas
+  excluir:
+    admin: full
+
+solicitacoes:
+  criar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+    cliente: own   # inferido do codigo (SolicitacaoController), nao veio da planilha
+  criar_rascunho_b2c:
+    # Pagina 4 do prompt "4 telas B2C" (SolicitacaoB2cController) - so o proprio
+    # cliente B2C mexe no proprio rascunho (own = por clienteB2cId, no codigo).
+    cliente: own
+  ver:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+    vistoriador: own
+  editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+  cancelar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+  excluir:
+    admin: full
+    suporte: full
+  tipos_servico_cadastrar:
+    admin: full
+    suporte: full
+
+laudos:
+  ver:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+    vistoriador: own
+  exportar_pdf:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+    # Vistoriador: sem acesso na planilha (laranja) — hoje o link publico de QR e o caminho
+    # de distribuicao do PDF, entao provavelmente nao e uma lacuna real.
+  contestacao_criar_editar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+  contestacao_excluir:
+    admin: full
+    suporte: full
+  assinatura_enviar:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+
+vistoriadores:
+  cadastrar:
+    admin: full
+  ver_disponibilidade:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+    imob_operacao: tenant
+    vistoriador: own
+    # FIXED: DisponibilidadeController.geral() now includes imob_gerencia and imob_operacao
+    # with tenant-scoping via TenantContext.findByVistoriadorIdIn. Documentation updated to reflect
+    # Page<Disponibilidade> response with pagination support (Pageable).
+  editar_excluir:
+    admin: full
+    suporte: full
+  ver_extrato_pagamento:
+    admin: full
+    suporte: full
+    vistoriador: own
+
+configuracoes:
+  tokens_api_keys:
+    admin: full
+  cidades_cadastrar:
+    admin: full
+  # (intervenientes_ver / intervenientes_configurar removidos — intervenientes
+  #  vivem só na solicitação; papéis são lookup público.)
+  relatorios_globais:
+    admin: full
+    suporte: full
+    imob_gerencia: tenant
+
+pleno:
+  consulta_on_demand:
+    admin: full
+    suporte: full
+    # nota: endpoints /v1/pleno/{imoveis|solicitacoes|pessoas} rodam sincrono com 3s timeout,
+    # circuit breaker e cache Postgres, nunca em transacao (rule 1 da arquitetura).
+
+pagamentos:
+  criar_cobranca:
+    admin: full
+    suporte: full
+    cliente: own   # inferido do codigo (PagamentoController), nao veio da planilha

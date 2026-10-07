@@ -1,0 +1,121 @@
+server:
+  shutdown: graceful
+  forward-headers-strategy: framework   # Traefik = trusted proxy
+
+spring:
+  application:
+    name: inspecta-api
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:test}
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  task:
+    scheduling:
+      pool:
+        size: 2                  # OutboxRelay + ApiKeyExpiryCron (T7.10)
+  datasource:
+    hikari:
+      maximum-pool-size: 8      # 2 scheduler threads + HTTP request handling + 3 headroom (T7.9)
+      minimum-idle: 2
+      # O Postgres do ambiente derruba conexão ociosa (idle_session_timeout do servidor).
+      # keepalive-time faz o Hikari "tocar" as conexões ociosas periodicamente (reseta o
+      # timer do PG); max-lifetime aposenta a conexão antes de o PG matá-la. Sem isto:
+      # WARN "This connection has been closed" e o 1º request após ociosidade falha/lento.
+      keepalive-time: 120000    # 2 min — precisa ser < idle_session_timeout do PG
+      max-lifetime: 600000      # 10 min
+  jpa:
+    hibernate:
+      ddl-auto: validate        # Flyway dono do schema
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Since Flyway 9.1.2, PostgreSQL migrations default to a *transactional* advisory lock:
+    # Flyway's main connection takes the lock inside an open transaction and holds it for the
+    # whole migrate() run. V10 (inspecta-core) runs CREATE INDEX CONCURRENTLY, which cannot run
+    # inside a transaction and must wait for every other open transaction/snapshot on the
+    # database to finish before it can proceed — including Flyway's own lock-holding
+    # connection. Result: migrate() deadlocks against itself and never returns (reproduced
+    # against a real Postgres 16 via MigrationSmokeTest: pg_stat_activity showed Flyway's main
+    # connection sitting "idle in transaction" on `SELECT COUNT(*) FROM pg_namespace ...`
+    # while its CONCURRENTLY connection waited on it forever). This is a known Flyway/Postgres
+    # interaction (flyway/flyway#3508, #3492); the documented fix is a session-level advisory
+    # lock instead of a transactional one. Applies to every environment (prod included) since
+    # any fresh/complete migration run would hang on boot without it.
+    postgresql:
+      transactional-lock: false
+
+inspecta:
+  # URL base do SPA (inspecta-web). Usada para montar links de e-mail (ex.: convite -> /convite?token=).
+  # Domínio único global, sem white-label por imobiliária. Em prod vem de INSPECTA_APP_URL (fail-fast).
+  app-url: ${INSPECTA_APP_URL:http://localhost:5173}
+  outbox:
+    poll-ms: 2000
+  # Decisão de negócio: o vistoriador NÃO vê o preço cobrado do cliente (só o repasse).
+  # Para voltar a mostrar: VISTORIADOR_VE_PRECO_COBRADO=true (ver PrecoVisibilidadePolicy).
+  visibilidade:
+    vistoriador-ve-preco-cobrado: ${VISTORIADOR_VE_PRECO_COBRADO:false}
+  # Webhooks de terceiros (autentique, pagamento, brokers) entram pelo inspecta-messenger, não pelo inspecta-api —
+  # os segredos inspecta.webhooks.* e as envs AUTENTIQUE_WEBHOOK_SECRET/ABACATEPAY_WEBHOOK_SECRET vivem
+  # no inspecta-messenger. O inspecta-api só tem o webhook de métricas, protegido por API key (sem segredo HMAC).
+  payment:
+    # NOTE: This key is read by inspecta-worker (PaymentConsumer.java:29), not by inspecta-api.
+    # API publishes payment events via outbox; inspecta-worker consumes and charges via this provider.
+    # Kept here for consistency (same config name across repos), but inspecta-api itself never instantiates
+    # a PaymentGateway bean. Value is fail-fast in prod (no default), mock in test.
+    provider: ${PAYMENT_PROVIDER}
+  signature:
+    # Broker de assinatura ativo (mesmos valores do inspecta-messenger: "mock" | "autentique"). O inspecta-api NÃO
+    # instancia broker nenhum — só reporta o nome em GET /v1/integracoes/config para o painel de
+    # integrações escolher qual aba de assinatura renderizar. Default seguro em prod (só leitura).
+    broker: ${SIGNATURE_BROKER:mock}
+  pleno:
+    # Modo Pleno: "mock" = cliente mock (test); "http" = PlenoClientHttp (prod).
+    # fail-fast em prod (todas as variaveis obrigatorias se mode != mock).
+    mode: ${PLENO_MODE}
+    poll-ms: ${PLENO_POLL_MS:60000}
+    base-url: ${PLENO_BASE_URL}
+    client-id: ${PLENO_CLIENT_ID}
+    client-secret: ${PLENO_CLIENT_SECRET}
+    cache-ttl-seconds: ${PLENO_CACHE_TTL_SECONDS:900}
+    # leitura on-demand roda em thread de request do usuario (arquitetura.md regra 1): timeout
+    # precisa abortar a chamada de verdade, nao so contar como "lenta" pras stats do circuit
+    # breaker (isso e o slow-call-duration-threshold la embaixo). Fica alinhado aos 3s do CB.
+    timeout-seconds: ${PLENO_TIMEOUT_SECONDS:3}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+    # Readiness group: only database is genuinely blocking
+    # Exclude AMQP — inspecta-api continues to serve even if broker is down
+    db:
+      enabled: true
+    rabbit:
+      enabled: false
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      pleno:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 80
